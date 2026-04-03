@@ -5,7 +5,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'GROQ_API_KEY não configurada no Vercel' });
+    return res.status(500).json({ error: 'GROQ_API_KEY nao configurada no Vercel' });
   }
 
   try {
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': 'Bearer ' + apiKey,
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
           },
           {
             role: 'user',
-            content: `Minha pergunta: "${question}"\n\nAs cartas sorteadas foram: ${cards.join(', ')}.\n\nFaça a leitura completa usando estas cartas, integrando Tarô, Astrologia e Cabala conforme as instruções.`,
+            content: 'Minha pergunta: "' + question + '"\n\nAs cartas sorteadas foram: ' + cards.join(', ') + '.\n\nFaca a leitura completa usando estas cartas, integrando Taro, Astrologia e Cabala conforme as instrucoes.',
           },
         ],
       }),
@@ -41,11 +41,11 @@ export default async function handler(req, res) {
     if (!response.ok) {
       const errText = await response.text();
       console.error('Groq API error:', errText);
-      return res.status(response.status).json({ error: `Erro na API Groq: ${response.status}` });
+      return res.status(response.status).json({ error: 'Erro na API Groq: ' + response.status });
     }
 
     const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || 'Sem resposta do oráculo.';
+    const text = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : 'Sem resposta do oraculo.';
 
     return res.status(200).json({ text });
   } catch (err) {
