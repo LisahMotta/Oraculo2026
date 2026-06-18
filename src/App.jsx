@@ -67,6 +67,24 @@ const CARD_GLYPHS = {
   "O Julgamento":"🎺","O Mundo":"🌍"
 };
 
+const SUGGESTED = [
+  "Como estão minhas finanças este mês?",
+  "Leitura geral sobre minha vida amorosa",
+  "O que o universo quer me dizer agora?",
+  "Orientação para minha carreira",
+  "Bloqueios que preciso superar",
+  "Energia espiritual do momento",
+];
+
+const DREAM_SUGGESTED = [
+  "Estava voando sobre uma cidade iluminada",
+  "Uma cobra me perseguia pelo jardim",
+  "Perdi todos os meus dentes",
+  "Estava perdido em uma floresta escura",
+  "Encontrei uma versão mais jovem de mim",
+  "Uma casa desconhecida mas muito familiar",
+];
+
 function formatResponse(text) {
   const lines = text.split('\n');
   return lines.map((line, i) => {
@@ -162,16 +180,24 @@ function LoadingOracle() {
   );
 }
 
-const SUGGESTED = [
-  "Como estão minhas finanças este mês?",
-  "Leitura geral sobre minha vida amorosa",
-  "O que o universo quer me dizer agora?",
-  "Orientação para minha carreira",
-  "Bloqueios que preciso superar",
-  "Energia espiritual do momento",
-];
+function LoadingDream() {
+  const [dots, setDots] = useState('');
+  useEffect(() => {
+    const interval = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 500);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div className="oracle-loading dream-loading">
+      <div className="dream-moon">🌙</div>
+      <p>Decifrando os símbolos do seu sonho{dots}</p>
+    </div>
+  );
+}
 
 export default function App() {
+  const [mode, setMode] = useState('oracle');
+
+  // Oracle state
   const [question, setQuestion] = useState('');
   const [spreadType, setSpreadType] = useState('auto');
   const [loading, setLoading] = useState(false);
@@ -181,7 +207,16 @@ export default function App() {
   const [error, setError] = useState('');
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Dream state
+  const [dreamText, setDreamText] = useState('');
+  const [dreamResponse, setDreamResponse] = useState('');
+  const [dreamLoading, setDreamLoading] = useState(false);
+  const [dreamError, setDreamError] = useState('');
+  const [dreamHistory, setDreamHistory] = useState([]);
+
   const responseRef = useRef(null);
+  const dreamResponseRef = useRef(null);
 
   function pickCards(n) {
     const shuffled = [...TAROT_CARDS].sort(() => Math.random() - 0.5);
@@ -231,10 +266,43 @@ export default function App() {
         timestamp: new Date().toLocaleString('pt-BR')
       }, ...prev].slice(0, 10));
     } catch (err) {
-      setError("Não foi possível consultar o oráculo. Verifique se a variável ANTHROPIC_API_KEY está configurada no Vercel.");
+      setError("Não foi possível consultar o oráculo. Verifique se a variável GROQ_API_KEY está configurada no Vercel.");
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function doDreamReading(text) {
+    if (!text.trim()) return;
+    setDreamError('');
+    setDreamResponse('');
+    setDreamLoading(true);
+
+    try {
+      const res = await fetch("/api/dream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dreamText: text })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setDreamResponse(data.text);
+      setDreamHistory(prev => [{
+        dreamText: text,
+        response: data.text,
+        timestamp: new Date().toLocaleString('pt-BR')
+      }, ...prev].slice(0, 10));
+    } catch (err) {
+      setDreamError("Não foi possível interpretar o sonho. Verifique se a variável GROQ_API_KEY está configurada no Vercel.");
+      console.error(err);
+    } finally {
+      setDreamLoading(false);
     }
   }
 
@@ -244,9 +312,26 @@ export default function App() {
     }
   }, [cardsReady]);
 
+  useEffect(() => {
+    if (dreamResponse && dreamResponseRef.current) {
+      setTimeout(() => dreamResponseRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    }
+  }, [dreamResponse]);
+
   function reset() {
     setQuestion(''); setCards(null); setResponse(''); setCardsReady(false); setError('');
   }
+
+  function resetDream() {
+    setDreamText(''); setDreamResponse(''); setDreamError('');
+  }
+
+  function switchMode(newMode) {
+    setMode(newMode);
+    setShowHistory(false);
+  }
+
+  const hasHistory = history.length > 0 || dreamHistory.length > 0;
 
   return (
     <>
@@ -262,20 +347,33 @@ export default function App() {
         .star { position: absolute; background: #fff8e1; border-radius: 50%; animation: twinkle ease-in-out infinite alternate; }
         @keyframes twinkle { from { opacity: 0.1; transform: scale(0.8); } to { opacity: 0.9; transform: scale(1.2); } }
         .content { position: relative; z-index: 1; max-width: 780px; margin: 0 auto; padding: 40px 20px 60px; }
-        .header { text-align: center; margin-bottom: 48px; animation: fadeDown 1s ease-out; }
+        .header { text-align: center; margin-bottom: 32px; animation: fadeDown 1s ease-out; }
         @keyframes fadeDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
         .header-eye { font-size: 42px; display: block; margin-bottom: 8px; filter: drop-shadow(0 0 20px rgba(212,175,85,0.4)); }
         .header h1 { font-family: 'Cinzel Decorative', serif; font-size: 28px; font-weight: 700; color: #e8d5a3; letter-spacing: 6px; text-transform: uppercase; text-shadow: 0 0 30px rgba(212,175,85,0.3); }
         .header-sub { font-size: 15px; color: #8a7d6b; margin-top: 8px; font-style: italic; letter-spacing: 2px; }
+        .mode-tabs { display: flex; gap: 0; margin: 0 auto 36px; max-width: 420px; border: 1px solid #2a2235; border-radius: 40px; overflow: hidden; background: rgba(10,8,18,0.7); }
+        .mode-tab { flex: 1; padding: 12px 20px; background: transparent; border: none; color: #7a6d58; font-family: 'Cinzel Decorative', serif; font-size: 13px; letter-spacing: 2px; cursor: pointer; transition: all 0.3s; text-transform: uppercase; }
+        .mode-tab:hover { color: #d4c5a9; }
+        .mode-tab.active.oracle-tab { background: linear-gradient(135deg, rgba(107,90,62,0.3), rgba(62,45,25,0.3)); color: #e8d5a3; }
+        .mode-tab.active.dream-tab { background: linear-gradient(135deg, rgba(60,40,100,0.35), rgba(30,20,60,0.35)); color: #c5b8e8; }
+        .mode-tab-icon { margin-right: 6px; }
         .divider { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 32px 0; color: #4a3f30; font-size: 12px; letter-spacing: 4px; }
         .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #4a3f30, transparent); }
+        .divider.dream-divider { color: #3d3060; }
+        .divider.dream-divider::before, .divider.dream-divider::after { background: linear-gradient(90deg, transparent, #3d3060, transparent); }
         .question-section { animation: fadeUp 0.8s ease-out 0.3s both; }
+        .dream-section { animation: fadeUp 0.8s ease-out 0.3s both; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .question-label { font-family: 'Cinzel Decorative', serif; font-size: 14px; color: #a89470; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; text-align: center; }
+        .dream-label { font-family: 'Cinzel Decorative', serif; font-size: 14px; color: #9a8ac0; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; text-align: center; }
         .textarea-wrap { position: relative; border: 1px solid #2a2235; border-radius: 12px; background: rgba(15,12,25,0.8); overflow: hidden; transition: border-color 0.3s; }
         .textarea-wrap:focus-within { border-color: #6b5a3e; box-shadow: 0 0 20px rgba(107,90,62,0.15); }
+        .textarea-wrap.dream-wrap:focus-within { border-color: #5a4a80; box-shadow: 0 0 20px rgba(90,74,128,0.2); }
         .textarea-wrap textarea { width: 100%; padding: 20px; background: transparent; border: none; color: #d4c5a9; font-family: 'Cormorant Garamond', serif; font-size: 17px; line-height: 1.6; resize: none; outline: none; min-height: 100px; }
         .textarea-wrap textarea::placeholder { color: #4a3f30; font-style: italic; }
+        .dream-wrap textarea::placeholder { color: #3d3460; }
+        .dream-wrap textarea { color: #d4c5e8; }
         .spread-row { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #1a1525; flex-wrap: wrap; }
         .spread-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #2a2235; background: transparent; color: #7a6d58; font-family: 'Cormorant Garamond', serif; font-size: 13px; cursor: pointer; transition: all 0.3s; }
         .spread-btn:hover { border-color: #6b5a3e; color: #d4c5a9; }
@@ -283,9 +381,14 @@ export default function App() {
         .consult-btn { display: block; width: 100%; margin-top: 20px; padding: 16px; background: linear-gradient(135deg, #3d2e1a, #2a1f10); border: 1px solid #6b5a3e; border-radius: 12px; color: #e8d5a3; font-family: 'Cinzel Decorative', serif; font-size: 16px; letter-spacing: 3px; cursor: pointer; transition: all 0.4s; text-transform: uppercase; }
         .consult-btn:hover:not(:disabled) { background: linear-gradient(135deg, #4d3e2a, #3a2f20); box-shadow: 0 0 30px rgba(212,175,85,0.15); transform: translateY(-1px); }
         .consult-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .dream-btn { display: block; width: 100%; margin-top: 20px; padding: 16px; background: linear-gradient(135deg, #1e1540, #150f30); border: 1px solid #5a4a80; border-radius: 12px; color: #c5b8e8; font-family: 'Cinzel Decorative', serif; font-size: 16px; letter-spacing: 3px; cursor: pointer; transition: all 0.4s; text-transform: uppercase; }
+        .dream-btn:hover:not(:disabled) { background: linear-gradient(135deg, #2a1f55, #1e1540); box-shadow: 0 0 30px rgba(140,120,200,0.2); transform: translateY(-1px); }
+        .dream-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; justify-content: center; }
         .suggestion-chip { padding: 8px 16px; border-radius: 20px; border: 1px solid #1e1830; background: rgba(20,15,35,0.6); color: #7a6d58; font-family: 'Cormorant Garamond', serif; font-size: 14px; cursor: pointer; transition: all 0.3s; }
         .suggestion-chip:hover { border-color: #4a3f30; color: #d4c5a9; background: rgba(40,30,55,0.6); }
+        .dream-chip { border-color: #201830; background: rgba(18,12,32,0.6); color: #6a5d88; }
+        .dream-chip:hover { border-color: #4a3a70; color: #c5b8e8; background: rgba(40,30,65,0.6); }
         .card-reveal-container { margin: 40px 0; overflow-x: auto; padding: 20px 0; }
         .cards-row { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
         .tarot-card { width: 100px; height: 160px; perspective: 600px; }
@@ -303,7 +406,15 @@ export default function App() {
         @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
         .oracle-eye { font-size: 48px; margin-bottom: 12px; filter: drop-shadow(0 0 15px rgba(212,175,85,0.3)); }
         .oracle-loading p { color: #8a7d6b; font-style: italic; font-size: 16px; letter-spacing: 1px; }
+        .dream-loading p { color: #8a7aaa; }
+        .dream-moon { font-size: 52px; margin-bottom: 12px; filter: drop-shadow(0 0 18px rgba(140,120,200,0.4)); animation: moonPulse 3s ease-in-out infinite; }
+        @keyframes moonPulse { 0%, 100% { transform: scale(0.95) rotate(-5deg); opacity: 0.7; } 50% { transform: scale(1.05) rotate(5deg); opacity: 1; } }
         .response-section { margin-top: 32px; padding: 32px 24px; background: rgba(15,12,25,0.6); border: 1px solid #1e1830; border-radius: 16px; animation: fadeUp 0.6s ease-out; }
+        .dream-response-section { border-color: #251e40; background: rgba(12,8,22,0.7); }
+        .dream-response-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #251e40; }
+        .dream-response-icon { font-size: 28px; filter: drop-shadow(0 0 10px rgba(140,120,200,0.4)); }
+        .dream-response-title { font-family: 'Cinzel Decorative', serif; font-size: 16px; color: #c5b8e8; letter-spacing: 2px; }
+        .dream-response-quote { font-size: 13px; color: #6a5d88; font-style: italic; margin-top: 4px; }
         .resp-h2 { font-family: 'Cinzel Decorative', serif; font-size: 18px; color: #e8d5a3; margin: 28px 0 14px; letter-spacing: 1px; border-bottom: 1px solid #2a2235; padding-bottom: 8px; }
         .resp-h2:first-child { margin-top: 0; }
         .resp-h3 { font-family: 'Cinzel Decorative', serif; font-size: 15px; color: #c4a96a; margin: 20px 0 10px; }
@@ -311,21 +422,34 @@ export default function App() {
         .resp-p { font-size: 16px; line-height: 1.75; margin: 6px 0; color: #c8b898; }
         .resp-item { padding-left: 20px; position: relative; margin: 6px 0; font-size: 15px; line-height: 1.6; color: #b8a888; }
         .resp-item::before { content: '◇'; position: absolute; left: 0; color: #6b5a3e; font-size: 10px; top: 4px; }
+        .dream-response-section .resp-h2 { color: #c5b8e8; border-bottom-color: #251e40; }
+        .dream-response-section .resp-h3 { color: #a08ad0; }
+        .dream-response-section .resp-bold { color: #a08ad0; }
+        .dream-response-section .resp-p { color: #b8b0d8; }
+        .dream-response-section .resp-item { color: #a8a0c8; }
+        .dream-response-section .resp-item::before { color: #5a4a80; }
         .resp-hr { border: none; border-top: 1px solid #2a2235; margin: 24px 0; }
         .resp-spacer { height: 8px; }
         .error-msg { text-align: center; padding: 20px; color: #a85a5a; background: rgba(80,30,30,0.2); border: 1px solid #5a2a2a; border-radius: 12px; margin: 20px 0; font-size: 15px; }
         .new-reading-btn { display: block; margin: 32px auto 0; padding: 14px 40px; background: transparent; border: 1px solid #4a3f30; border-radius: 30px; color: #a89470; font-family: 'Cinzel Decorative', serif; font-size: 14px; letter-spacing: 2px; cursor: pointer; transition: all 0.3s; }
         .new-reading-btn:hover { border-color: #8a7340; color: #e8d5a3; box-shadow: 0 0 20px rgba(138,115,64,0.15); }
+        .new-dream-btn { display: block; margin: 32px auto 0; padding: 14px 40px; background: transparent; border: 1px solid #3d3060; border-radius: 30px; color: #8a7aaa; font-family: 'Cinzel Decorative', serif; font-size: 14px; letter-spacing: 2px; cursor: pointer; transition: all 0.3s; }
+        .new-dream-btn:hover { border-color: #6a5a90; color: #c5b8e8; box-shadow: 0 0 20px rgba(138,115,200,0.15); }
         .history-toggle { position: fixed; top: 16px; right: 16px; z-index: 10; background: rgba(15,12,25,0.9); border: 1px solid #2a2235; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #8a7d6b; font-size: 18px; transition: all 0.3s; }
         .history-toggle:hover { border-color: #6b5a3e; color: #e8d5a3; }
         .history-panel { position: fixed; top: 0; right: 0; width: min(360px, 90vw); height: 100vh; background: rgba(10,8,18,0.97); border-left: 1px solid #2a2235; z-index: 20; padding: 24px 20px; overflow-y: auto; animation: slideIn 0.3s ease-out; }
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
         .history-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: #7a6d58; font-size: 24px; cursor: pointer; }
         .history-title { font-family: 'Cinzel Decorative', serif; font-size: 16px; color: #e8d5a3; letter-spacing: 2px; margin-bottom: 24px; }
+        .history-section-label { font-family: 'Cinzel Decorative', serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #1e1830; }
+        .history-section-label.oracle-label { color: #6b5a3e; }
+        .history-section-label.dream-label { color: #4a3a70; }
         .history-item { padding: 16px; border: 1px solid #1e1830; border-radius: 10px; margin-bottom: 12px; cursor: pointer; transition: border-color 0.3s; }
         .history-item:hover { border-color: #4a3f30; }
+        .history-item.dream-history-item:hover { border-color: #3a2e60; }
         .history-date { font-size: 12px; color: #5a5040; margin-bottom: 6px; }
         .history-q { font-size: 14px; color: #a89470; margin-bottom: 8px; font-style: italic; }
+        .history-item.dream-history-item .history-q { color: #8a7aaa; }
         .history-cards { display: flex; gap: 4px; flex-wrap: wrap; }
         .history-card-chip { padding: 3px 8px; background: rgba(107,90,62,0.15); border-radius: 10px; font-size: 11px; color: #8a7340; }
         .history-empty { color: #4a3f30; font-style: italic; text-align: center; margin-top: 40px; }
@@ -339,26 +463,46 @@ export default function App() {
           .response-section { padding: 20px 16px; }
           .suggestions { gap: 6px; }
           .suggestion-chip { font-size: 12px; padding: 6px 12px; }
+          .mode-tab { font-size: 11px; padding: 10px 12px; letter-spacing: 1px; }
         }
       `}</style>
       <div className="oracle-app">
         <StarField />
-        {history.length > 0 && <button className="history-toggle" onClick={() => setShowHistory(true)}>☰</button>}
+        {hasHistory && <button className="history-toggle" onClick={() => setShowHistory(true)}>☰</button>}
         {showHistory && (
           <div className="history-panel">
             <button className="history-close" onClick={() => setShowHistory(false)}>×</button>
-            <div className="history-title">Leituras Anteriores</div>
-            {history.length === 0 ? <div className="history-empty">Nenhuma leitura ainda</div> : (
-              history.map((h, i) => (
-                <div key={i} className="history-item" onClick={() => {
-                  setCards(h.cards); setResponse(h.response); setCardsReady(true); setQuestion(h.question); setShowHistory(false);
-                }}>
-                  <div className="history-date">{h.timestamp}</div>
-                  <div className="history-q">"{h.question}"</div>
-                  <div className="history-cards">{h.cards.map((c, j) => <span key={j} className="history-card-chip">{c}</span>)}</div>
-                </div>
-              ))
+            <div className="history-title">Histórico</div>
+            {history.length > 0 && (
+              <>
+                <div className="history-section-label oracle-label">✦ Leituras de Tarô</div>
+                {history.map((h, i) => (
+                  <div key={i} className="history-item" onClick={() => {
+                    setCards(h.cards); setResponse(h.response); setCardsReady(true);
+                    setQuestion(h.question); setShowHistory(false); setMode('oracle');
+                  }}>
+                    <div className="history-date">{h.timestamp}</div>
+                    <div className="history-q">"{h.question}"</div>
+                    <div className="history-cards">{h.cards.map((c, j) => <span key={j} className="history-card-chip">{c}</span>)}</div>
+                  </div>
+                ))}
+              </>
             )}
+            {dreamHistory.length > 0 && (
+              <>
+                <div className="history-section-label dream-label">🌙 Interpretações de Sonhos</div>
+                {dreamHistory.map((h, i) => (
+                  <div key={i} className="history-item dream-history-item" onClick={() => {
+                    setDreamText(h.dreamText); setDreamResponse(h.response);
+                    setShowHistory(false); setMode('dream');
+                  }}>
+                    <div className="history-date">{h.timestamp}</div>
+                    <div className="history-q">"{h.dreamText.slice(0, 80)}{h.dreamText.length > 80 ? '...' : ''}"</div>
+                  </div>
+                ))}
+              </>
+            )}
+            {!hasHistory && <div className="history-empty">Nenhum registro ainda</div>}
           </div>
         )}
         <div className="content">
@@ -367,31 +511,102 @@ export default function App() {
             <h1>Oráculo Místico</h1>
             <div className="header-sub">Tarô · Astrologia · Cabala</div>
           </div>
-          {!cards && (
-            <div className="question-section">
-              <div className="question-label">Faça sua pergunta ao oráculo</div>
-              <div className="textarea-wrap">
-                <textarea value={question} onChange={e => setQuestion(e.target.value)}
-                  placeholder="Escreva sua questão ou escolha uma sugestão abaixo..." rows={3}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doReading(question); } }} />
-                <div className="spread-row">
-                  {[['auto','Automática'],['3','3 cartas'],['5','5 cartas'],['7','7 cartas']].map(([val, label]) => (
-                    <button key={val} className={`spread-btn ${spreadType === val ? 'active' : ''}`} onClick={() => setSpreadType(val)}>{label}</button>
-                  ))}
+
+          <div className="mode-tabs">
+            <button
+              className={`mode-tab oracle-tab ${mode === 'oracle' ? 'active' : ''}`}
+              onClick={() => switchMode('oracle')}
+            >
+              <span className="mode-tab-icon">✦</span>Oráculo
+            </button>
+            <button
+              className={`mode-tab dream-tab ${mode === 'dream' ? 'active' : ''}`}
+              onClick={() => switchMode('dream')}
+            >
+              <span className="mode-tab-icon">🌙</span>Sonhos
+            </button>
+          </div>
+
+          {/* ORACLE MODE */}
+          {mode === 'oracle' && (
+            <>
+              {!cards && (
+                <div className="question-section">
+                  <div className="question-label">Faça sua pergunta ao oráculo</div>
+                  <div className="textarea-wrap">
+                    <textarea value={question} onChange={e => setQuestion(e.target.value)}
+                      placeholder="Escreva sua questão ou escolha uma sugestão abaixo..." rows={3}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doReading(question); } }} />
+                    <div className="spread-row">
+                      {[['auto','Automática'],['3','3 cartas'],['5','5 cartas'],['7','7 cartas']].map(([val, label]) => (
+                        <button key={val} className={`spread-btn ${spreadType === val ? 'active' : ''}`} onClick={() => setSpreadType(val)}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <button className="consult-btn" onClick={() => doReading(question)} disabled={!question.trim() || loading}>✦ Consultar o Oráculo ✦</button>
+                  <div className="divider">sugestões</div>
+                  <div className="suggestions">
+                    {SUGGESTED.map((s, i) => <button key={i} className="suggestion-chip" onClick={() => { setQuestion(s); doReading(s); }}>{s}</button>)}
+                  </div>
                 </div>
-              </div>
-              <button className="consult-btn" onClick={() => doReading(question)} disabled={!question.trim() || loading}>✦ Consultar o Oráculo ✦</button>
-              <div className="divider">sugestões</div>
-              <div className="suggestions">
-                {SUGGESTED.map((s, i) => <button key={i} className="suggestion-chip" onClick={() => { setQuestion(s); doReading(s); }}>{s}</button>)}
-              </div>
-            </div>
+              )}
+              {cards && <CardReveal cards={cards} onComplete={() => setCardsReady(true)} />}
+              {cards && loading && <LoadingOracle />}
+              {error && <div className="error-msg">{error}</div>}
+              {response && cardsReady && <div className="response-section" ref={responseRef}>{formatResponse(response)}</div>}
+              {response && cardsReady && <button className="new-reading-btn" onClick={reset}>✦ Nova Leitura ✦</button>}
+            </>
           )}
-          {cards && <CardReveal cards={cards} onComplete={() => setCardsReady(true)} />}
-          {cards && loading && <LoadingOracle />}
-          {error && <div className="error-msg">{error}</div>}
-          {response && cardsReady && <div className="response-section" ref={responseRef}>{formatResponse(response)}</div>}
-          {response && cardsReady && <button className="new-reading-btn" onClick={reset}>✦ Nova Leitura ✦</button>}
+
+          {/* DREAM MODE */}
+          {mode === 'dream' && (
+            <>
+              {!dreamResponse && (
+                <div className="dream-section">
+                  <div className="dream-label">Descreva seu sonho</div>
+                  <div className="textarea-wrap dream-wrap">
+                    <textarea
+                      value={dreamText}
+                      onChange={e => setDreamText(e.target.value)}
+                      placeholder="Conte seu sonho com o máximo de detalhes... personagens, cenários, cores, emoções, eventos..."
+                      rows={5}
+                      onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); doDreamReading(dreamText); } }}
+                    />
+                  </div>
+                  <button
+                    className="dream-btn"
+                    onClick={() => doDreamReading(dreamText)}
+                    disabled={!dreamText.trim() || dreamLoading}
+                  >
+                    🌙 Interpretar Sonho 🌙
+                  </button>
+                  <div className="divider dream-divider">exemplos</div>
+                  <div className="suggestions">
+                    {DREAM_SUGGESTED.map((s, i) => (
+                      <button key={i} className="suggestion-chip dream-chip" onClick={() => { setDreamText(s); doDreamReading(s); }}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {dreamLoading && <LoadingDream />}
+              {dreamError && <div className="error-msg">{dreamError}</div>}
+              {dreamResponse && !dreamLoading && (
+                <div className="response-section dream-response-section" ref={dreamResponseRef}>
+                  <div className="dream-response-header">
+                    <span className="dream-response-icon">🌙</span>
+                    <div>
+                      <div className="dream-response-title">Interpretação do Sonho</div>
+                      <div className="dream-response-quote">"{dreamText.slice(0, 60)}{dreamText.length > 60 ? '...' : ''}"</div>
+                    </div>
+                  </div>
+                  {formatResponse(dreamResponse)}
+                </div>
+              )}
+              {dreamResponse && !dreamLoading && (
+                <button className="new-dream-btn" onClick={resetDream}>🌙 Interpretar Novo Sonho 🌙</button>
+              )}
+            </>
+          )}
         </div>
       </div>
     </>
