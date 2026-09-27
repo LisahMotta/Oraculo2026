@@ -1,34 +1,22 @@
-// Padrões de preferência para modelos de texto (ordem de prioridade)
-const MODEL_PREFERENCE = ['llama-4', 'llama4', 'llama-3', 'llama3', 'mixtral', 'gemma', 'qwen', 'deepseek'];
-const MODEL_EXCLUDE = ['whisper', 'embed', 'tts', 'guard', 'tool'];
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
+const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
-async function pickModel(apiKey) {
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/models', {
-      headers: { 'Authorization': 'Bearer ' + apiKey },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const ids = (data.data || [])
-      .map(m => m.id)
-      .filter(id => !MODEL_EXCLUDE.some(x => id.toLowerCase().includes(x)));
-
-    for (const pattern of MODEL_PREFERENCE) {
-      const match = ids.find(id => id.toLowerCase().includes(pattern));
-      if (match) return match;
-    }
-    return ids[0] || null;
-  } catch (e) {
-    console.error('Erro ao listar modelos Groq:', e.message);
-    return null;
-  }
+function geminiErrorMessage(status) {
+  if (status === 401 || status === 403) return 'Chave da API Gemini inválida ou expirada. Verifique a variável GEMINI_API_KEY no Vercel.';
+  if (status === 429) return 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.';
+  if (status === 503) return 'Serviço Gemini temporariamente indisponível. Tente novamente em instantes.';
+  return 'Erro na API Gemini (' + status + '). Tente novamente em instantes.';
 }
 
-function groqErrorMessage(status) {
-  if (status === 401) return 'Chave da API Groq inválida ou expirada. Verifique a variável GROQ_API_KEY no Vercel.';
-  if (status === 429) return 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.';
-  if (status === 503) return 'Serviço Groq temporariamente indisponível. Tente novamente em instantes.';
-  return 'Erro na API Groq (' + status + '). Tente novamente em instantes.';
+async function callGemini(apiKey, model, messages, temperature) {
+  return fetch(GEMINI_BASE + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey,
+    },
+    body: JSON.stringify({ model, temperature, messages }),
+  });
 }
 
 export default async function handler(req, res) {
@@ -36,9 +24,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'GROQ_API_KEY não configurada no Vercel. Acesse Settings → Environment Variables.' });
+    return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no Vercel. Acesse Settings → Environment Variables e adicione sua chave do Google AI Studio (aistudio.google.com).' });
   }
 
   try {
@@ -47,40 +35,31 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Dados incompletos' });
     }
 
-    const model = await pickModel(apiKey);
-    if (!model) {
-      return res.status(500).json({ error: 'Nenhum modelo de texto disponível no Groq. Tente novamente em instantes.' });
-    }
-    console.log('Usando modelo:', model);
+    const userMessage = 'Minha pergunta: "' + question + '"\n\nAs cartas sorteadas foram: ' + cards.join(', ') + '.\n\nFaca a leitura completa usando estas cartas, integrando Taro, Astrologia e Cabala conforme as instrucoes.';
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ];
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.8,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content: 'Minha pergunta: "' + question + '"\n\nAs cartas sorteadas foram: ' + cards.join(', ') + '.\n\nFaca a leitura completa usando estas cartas, integrando Taro, Astrologia e Cabala conforme as instrucoes.',
-          },
-        ],
-      }),
-    });
+    let lastStatus = null;
+    for (const model of MODEL_CANDIDATES) {
+      console.log('Tentando modelo Gemini:', model);
+      const response = await callGemini(apiKey, model, messages, 0.8);
 
-    if (!response.ok) {
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content ?? 'Sem resposta do oráculo.';
+        return res.status(200).json({ text });
+      }
+
+      lastStatus = response.status;
       const errText = await response.text();
-      console.error('Groq error [' + model + '] ' + response.status + ':', errText);
-      return res.status(500).json({ error: groqErrorMessage(response.status) });
+      console.error('Gemini error [' + model + '] ' + response.status + ':', errText);
+
+      if (response.status === 401 || response.status === 403) break;
     }
 
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content ?? 'Sem resposta do oráculo.';
-    return res.status(200).json({ text });
+    return res.status(500).json({ error: geminiErrorMessage(lastStatus) });
   } catch (err) {
     console.error('Server error:', err.message);
     return res.status(500).json({ error: err.message });
