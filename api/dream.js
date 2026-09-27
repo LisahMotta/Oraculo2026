@@ -37,7 +37,7 @@ Sua função é decifrar os símbolos, arquétipos e mensagens ocultas nos sonho
 Sempre comece com: "Seu sonho carrega mensagens profundas do seu inconsciente..."
 E finalize com: "Os sonhos são pontes entre quem você é e quem pode se tornar."`;
 
-const MODEL_EXCLUDE = ['embedding', 'aqa', 'vision', 'imagen', 'tts', 'whisper'];
+const MODEL_EXCLUDE = ['embedding', 'aqa', 'imagen', 'tts', 'whisper'];
 const MODEL_PREFER = ['flash', 'pro'];
 
 async function pickGeminiModel(apiKey) {
@@ -45,12 +45,17 @@ async function pickGeminiModel(apiKey) {
     const res = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error('models list ' + res.status + ': ' + (err?.error?.message || res.statusText));
+    }
     const data = await res.json();
     const names = (data.models || [])
-      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
       .map(m => m.name.replace('models/', ''))
       .filter(name => !MODEL_EXCLUDE.some(x => name.toLowerCase().includes(x)));
+
+    console.log('Modelos disponíveis para generateContent:', names);
 
     for (const pref of MODEL_PREFER) {
       const match = names.find(n => n.toLowerCase().includes(pref));
@@ -59,7 +64,7 @@ async function pickGeminiModel(apiKey) {
     return names[0] || null;
   } catch (e) {
     console.error('Erro ao listar modelos Gemini:', e.message);
-    return null;
+    throw e;
   }
 }
 
@@ -74,14 +79,6 @@ async function callGemini(apiKey, model, userMessage, temperature) {
       generationConfig: { temperature },
     }),
   });
-}
-
-function geminiErrorMessage(status) {
-  if (status === 400) return 'Chave da API Gemini inválida. Verifique GEMINI_API_KEY no Vercel.';
-  if (status === 401 || status === 403) return 'Chave da API Gemini sem permissão. Verifique GEMINI_API_KEY no Vercel.';
-  if (status === 429) return 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.';
-  if (status === 503) return 'Serviço Gemini temporariamente indisponível. Tente novamente em instantes.';
-  return 'Erro na API Gemini (' + status + '). Tente novamente em instantes.';
 }
 
 export default async function handler(req, res) {
@@ -100,9 +97,15 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Descrição do sonho ausente' });
     }
 
-    const model = await pickGeminiModel(apiKey);
+    let model;
+    try {
+      model = await pickGeminiModel(apiKey);
+    } catch (e) {
+      return res.status(500).json({ error: 'Falha ao listar modelos Gemini: ' + e.message });
+    }
+
     if (!model) {
-      return res.status(500).json({ error: 'Nenhum modelo Gemini disponível. Verifique se GEMINI_API_KEY está correta no Vercel.' });
+      return res.status(500).json({ error: 'Nenhum modelo Gemini disponível para sua chave. Verifique se GEMINI_API_KEY é uma chave válida do Google AI Studio (aistudio.google.com).' });
     }
     console.log('Usando modelo Gemini:', model);
 
@@ -110,9 +113,10 @@ export default async function handler(req, res) {
     const response = await callGemini(apiKey, model, userMessage, 0.85);
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error('Gemini error [' + model + '] ' + response.status + ':', errText);
-      return res.status(500).json({ error: geminiErrorMessage(response.status) });
+      const errBody = await response.json().catch(() => ({}));
+      const detail = errBody?.error?.message || response.statusText;
+      console.error('Gemini error [' + model + '] ' + response.status + ':', detail);
+      return res.status(500).json({ error: 'Erro Gemini no modelo ' + model + ' (' + response.status + '): ' + detail });
     }
 
     const data = await response.json();
