@@ -37,54 +37,36 @@ Sua função é decifrar os símbolos, arquétipos e mensagens ocultas nos sonho
 Sempre comece com: "Seu sonho carrega mensagens profundas do seu inconsciente..."
 E finalize com: "Os sonhos são pontes entre quem você é e quem pode se tornar."`;
 
-const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-70b-versatile',
-  'llama3-70b-8192',
-];
+const MODEL_PREFERENCE = ['llama-4', 'llama4', 'llama-3', 'llama3', 'mixtral', 'gemma', 'qwen', 'deepseek'];
+const MODEL_EXCLUDE = ['whisper', 'embed', 'tts', 'guard', 'tool'];
+
+async function pickModel(apiKey) {
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { 'Authorization': 'Bearer ' + apiKey },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ids = (data.data || [])
+      .map(m => m.id)
+      .filter(id => !MODEL_EXCLUDE.some(x => id.toLowerCase().includes(x)));
+
+    for (const pattern of MODEL_PREFERENCE) {
+      const match = ids.find(id => id.toLowerCase().includes(pattern));
+      if (match) return match;
+    }
+    return ids[0] || null;
+  } catch (e) {
+    console.error('Erro ao listar modelos Groq:', e.message);
+    return null;
+  }
+}
 
 function groqErrorMessage(status) {
   if (status === 401) return 'Chave da API Groq inválida ou expirada. Verifique a variável GROQ_API_KEY no Vercel.';
   if (status === 429) return 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.';
   if (status === 503) return 'Serviço Groq temporariamente indisponível. Tente novamente em instantes.';
   return 'Erro na API Groq (' + status + '). Tente novamente em instantes.';
-}
-
-async function callGroq(apiKey, messages) {
-  let lastStatus = null;
-
-  for (const model of GROQ_MODELS) {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0.85,
-      }),
-    });
-
-    if (response.status === 404) {
-      console.log('Modelo não encontrado, tentando próximo:', model);
-      continue;
-    }
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Groq error [' + model + '] ' + response.status + ':', errText);
-      lastStatus = response.status;
-      if (response.status === 401 || response.status === 429) break;
-      continue;
-    }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content ?? 'Sem resposta do intérprete.';
-  }
-
-  throw new Error(lastStatus ? groqErrorMessage(lastStatus) : 'Nenhum modelo Groq disponível. Tente novamente em instantes.');
 }
 
 export default async function handler(req, res) {
@@ -99,20 +81,43 @@ export default async function handler(req, res) {
 
   try {
     const { dreamText } = req.body;
-
     if (!dreamText) {
       return res.status(400).json({ error: 'Descrição do sonho ausente' });
     }
 
-    const messages = [
-      { role: 'system', content: DREAM_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: 'Meu sonho foi: "' + dreamText + '"\n\nPor favor, faça a interpretação completa deste sonho, identificando símbolos, arquétipos junguianos e a mensagem espiritual, conforme as instruções.',
-      },
-    ];
+    const model = await pickModel(apiKey);
+    if (!model) {
+      return res.status(500).json({ error: 'Nenhum modelo de texto disponível no Groq. Tente novamente em instantes.' });
+    }
+    console.log('Usando modelo:', model);
 
-    const text = await callGroq(apiKey, messages);
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.85,
+        messages: [
+          { role: 'system', content: DREAM_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: 'Meu sonho foi: "' + dreamText + '"\n\nPor favor, faça a interpretação completa deste sonho, identificando símbolos, arquétipos junguianos e a mensagem espiritual, conforme as instruções.',
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Groq error [' + model + '] ' + response.status + ':', errText);
+      return res.status(500).json({ error: groqErrorMessage(response.status) });
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content ?? 'Sem resposta do intérprete.';
     return res.status(200).json({ text });
   } catch (err) {
     console.error('Server error:', err.message);
