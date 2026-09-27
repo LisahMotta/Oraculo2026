@@ -266,7 +266,7 @@ export default function App() {
         timestamp: new Date().toLocaleString('pt-BR')
       }, ...prev].slice(0, 10));
     } catch (err) {
-      setError("Não foi possível consultar o oráculo. Verifique se a variável GROQ_API_KEY está configurada no Vercel.");
+      setError(err.message || "Não foi possível consultar o oráculo. Tente novamente em instantes.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -299,7 +299,7 @@ export default function App() {
         timestamp: new Date().toLocaleString('pt-BR')
       }, ...prev].slice(0, 10));
     } catch (err) {
-      setDreamError("Não foi possível interpretar o sonho. Verifique se a variável GROQ_API_KEY está configurada no Vercel.");
+      setDreamError(err.message || "Não foi possível interpretar o sonho. Tente novamente em instantes.");
       console.error(err);
     } finally {
       setDreamLoading(false);
