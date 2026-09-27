@@ -15,12 +15,15 @@ export default async function handler(req, res) {
       'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey
     );
     const body = await response.json();
+    const generateContentModels = (body.models || [])
+      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+      .map(m => m.name);
+
     return res.status(200).json({
       key_present: true,
       key_preview: keyPreview,
-      key_length: apiKey.length,
       http_status: response.status,
-      models: body.models?.map(m => m.name) ?? [],
+      generateContent_models: generateContentModels,
       raw_error: body.error ?? null,
     });
   } catch (err) {
