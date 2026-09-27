@@ -50,17 +50,24 @@ function groqErrorMessage(status) {
   return 'Erro na API Groq (' + status + '). Tente novamente em instantes.';
 }
 
-async function callGroq(apiKey, body) {
+async function callGroq(apiKey, messages) {
   let lastStatus = null;
 
   for (const model of GROQ_MODELS) {
+    const payload = {
+      model,
+      max_completion_tokens: 4000,
+      temperature: 0.85,
+      messages,
+    };
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + apiKey,
       },
-      body: JSON.stringify({ ...body, model }),
+      body: JSON.stringify(payload),
     });
 
     if (response.status === 404) {
@@ -70,7 +77,7 @@ async function callGroq(apiKey, body) {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Groq API error (' + model + ') ' + response.status + ':', errText);
+      console.error('Groq error [' + model + '] ' + response.status + ':', errText);
       lastStatus = response.status;
       if (response.status === 401 || response.status === 429) break;
       continue;
@@ -100,18 +107,15 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Descrição do sonho ausente' });
     }
 
-    const text = await callGroq(apiKey, {
-      max_tokens: 4000,
-      temperature: 0.85,
-      messages: [
-        { role: 'system', content: DREAM_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: 'Meu sonho foi: "' + dreamText + '"\n\nPor favor, faça a interpretação completa deste sonho, identificando símbolos, arquétipos junguianos e a mensagem espiritual, conforme as instruções.',
-        },
-      ],
-    });
+    const messages = [
+      { role: 'system', content: DREAM_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: 'Meu sonho foi: "' + dreamText + '"\n\nPor favor, faça a interpretação completa deste sonho, identificando símbolos, arquétipos junguianos e a mensagem espiritual, conforme as instruções.',
+      },
+    ];
 
+    const text = await callGroq(apiKey, messages);
     return res.status(200).json({ text });
   } catch (err) {
     console.error('Server error:', err.message);
