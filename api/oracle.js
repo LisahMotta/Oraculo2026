@@ -1,32 +1,32 @@
 const MODEL_EXCLUDE = ['embedding', 'aqa', 'imagen', 'tts', 'whisper'];
-const MODEL_PREFER = ['flash', 'pro'];
 
-async function pickGeminiModel(apiKey) {
-  try {
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error('models list ' + res.status + ': ' + (err?.error?.message || res.statusText));
-    }
-    const data = await res.json();
-    const names = (data.models || [])
-      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-      .map(m => m.name.replace('models/', ''))
-      .filter(name => !MODEL_EXCLUDE.some(x => name.toLowerCase().includes(x)));
+function sortByPreference(names) {
+  const score = name => {
+    if (name.includes('3.8')) return 100;
+    if (name.includes('3.0') || name.includes('3-flash')) return 90;
+    if (name.includes('2.0')) return 80;
+    if (name.includes('flash')) return 70;
+    if (name.includes('pro')) return 60;
+    return 50;
+  };
+  return [...names].sort((a, b) => score(b) - score(a));
+}
 
-    console.log('Modelos disponíveis para generateContent:', names);
-
-    for (const pref of MODEL_PREFER) {
-      const match = names.find(n => n.toLowerCase().includes(pref));
-      if (match) return match;
-    }
-    return names[0] || null;
-  } catch (e) {
-    console.error('Erro ao listar modelos Gemini:', e.message);
-    throw e;
+async function listGeminiModels(apiKey) {
+  const res = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error('Falha ao listar modelos (' + res.status + '): ' + (err?.error?.message || res.statusText));
   }
+  const data = await res.json();
+  const names = (data.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace('models/', ''))
+    .filter(name => !MODEL_EXCLUDE.some(x => name.toLowerCase().includes(x)));
+  console.log('Modelos disponíveis:', names);
+  return sortByPreference(names);
 }
 
 async function callGemini(apiKey, model, systemPrompt, userMessage, temperature) {
@@ -58,31 +58,40 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Dados incompletos' });
     }
 
-    let model;
+    let models;
     try {
-      model = await pickGeminiModel(apiKey);
+      models = await listGeminiModels(apiKey);
     } catch (e) {
-      return res.status(500).json({ error: 'Falha ao listar modelos Gemini: ' + e.message });
+      return res.status(500).json({ error: e.message });
     }
 
-    if (!model) {
-      return res.status(500).json({ error: 'Nenhum modelo Gemini disponível para sua chave. Verifique se GEMINI_API_KEY é uma chave válida do Google AI Studio (aistudio.google.com).' });
+    if (!models.length) {
+      return res.status(500).json({ error: 'Nenhum modelo Gemini disponível. Verifique se GEMINI_API_KEY é válida.' });
     }
-    console.log('Usando modelo Gemini:', model);
 
     const userMessage = 'Minha pergunta: "' + question + '"\n\nAs cartas sorteadas foram: ' + cards.join(', ') + '.\n\nFaca a leitura completa usando estas cartas, integrando Taro, Astrologia e Cabala conforme as instrucoes.';
-    const response = await callGemini(apiKey, model, systemPrompt, userMessage, 0.8);
 
-    if (!response.ok) {
+    let lastError = '';
+    for (const model of models) {
+      console.log('Tentando modelo:', model);
+      const response = await callGemini(apiKey, model, systemPrompt, userMessage, 0.8);
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'Sem resposta do oráculo.';
+        console.log('Sucesso com modelo:', model);
+        return res.status(200).json({ text });
+      }
+
       const errBody = await response.json().catch(() => ({}));
-      const detail = errBody?.error?.message || response.statusText;
-      console.error('Gemini error [' + model + '] ' + response.status + ':', detail);
-      return res.status(500).json({ error: 'Erro Gemini no modelo ' + model + ' (' + response.status + '): ' + detail });
+      lastError = errBody?.error?.message || response.statusText;
+      console.error('Erro no modelo ' + model + ' (' + response.status + '):', lastError);
+
+      if (response.status === 404) continue;
+      break;
     }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'Sem resposta do oráculo.';
-    return res.status(200).json({ text });
+    return res.status(500).json({ error: 'Nenhum modelo disponível: ' + lastError });
   } catch (err) {
     console.error('Server error:', err.message);
     return res.status(500).json({ error: err.message });
