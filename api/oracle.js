@@ -15,20 +15,17 @@ async function callGroq(apiKey, messages) {
   let lastStatus = null;
 
   for (const model of GROQ_MODELS) {
-    const payload = {
-      model,
-      max_completion_tokens: 4000,
-      temperature: 0.8,
-      messages,
-    };
-
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + apiKey,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.8,
+      }),
     });
 
     if (response.status === 404) {
