@@ -43,7 +43,16 @@ const GROQ_MODELS = [
   'llama3-70b-8192',
 ];
 
+function groqErrorMessage(status) {
+  if (status === 401) return 'Chave da API Groq inválida ou expirada. Verifique a variável GROQ_API_KEY no Vercel.';
+  if (status === 429) return 'Limite de requisições atingido. Aguarde alguns segundos e tente novamente.';
+  if (status === 503) return 'Serviço Groq temporariamente indisponível. Tente novamente em instantes.';
+  return 'Erro na API Groq (' + status + '). Tente novamente em instantes.';
+}
+
 async function callGroq(apiKey, body) {
+  let lastStatus = null;
+
   for (const model of GROQ_MODELS) {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -54,18 +63,24 @@ async function callGroq(apiKey, body) {
       body: JSON.stringify({ ...body, model }),
     });
 
-    if (response.status === 404) continue;
+    if (response.status === 404) {
+      console.log('Modelo não encontrado, tentando próximo:', model);
+      continue;
+    }
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Groq API error (' + model + '):', errText);
-      throw new Error('Groq ' + response.status);
+      console.error('Groq API error (' + model + ') ' + response.status + ':', errText);
+      lastStatus = response.status;
+      if (response.status === 401 || response.status === 429) break;
+      continue;
     }
 
     const data = await response.json();
     return data.choices?.[0]?.message?.content ?? 'Sem resposta do intérprete.';
   }
-  throw new Error('Nenhum modelo Groq disponível no momento.');
+
+  throw new Error(lastStatus ? groqErrorMessage(lastStatus) : 'Nenhum modelo Groq disponível. Tente novamente em instantes.');
 }
 
 export default async function handler(req, res) {
@@ -75,7 +90,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'GROQ_API_KEY nao configurada no Vercel' });
+    return res.status(500).json({ error: 'GROQ_API_KEY não configurada no Vercel. Acesse Settings → Environment Variables.' });
   }
 
   try {
@@ -99,7 +114,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ text });
   } catch (err) {
-    console.error('Server error:', err);
-    return res.status(500).json({ error: 'Não foi possível interpretar o sonho. Tente novamente em instantes.' });
+    console.error('Server error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 }
